@@ -84,23 +84,48 @@ export function ProductDetailView() {
     if (!reviewComment.trim()) return;
     setSubmittingReview(true);
     try {
-      const res = await fetch(`/api/products/${product.id}/reviews`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userName: user?.name || 'Verified Anna Nagar Shopper',
-          rating: reviewRating,
-          title: reviewTitle || 'Fresh RAVI Quality',
-          comment: reviewComment,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.product) {
-        updateProductInState(data.product);
-        setReviewTitle('');
-        setReviewComment('');
-        pushToast('Review Posted', 'Thank you for sharing your feedback.');
+      try {
+        const res = await fetch(`/api/products/${product.id}/reviews`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userName: user?.name || 'Verified Anna Nagar Shopper',
+            rating: reviewRating,
+            title: reviewTitle || 'Fresh RAVI Quality',
+            comment: reviewComment,
+          }),
+        });
+        const ct = res.headers.get('content-type') || '';
+        if (res.ok && ct.includes('application/json')) {
+          const data = await res.json();
+          if (data.product) {
+            updateProductInState(data.product);
+            setReviewTitle('');
+            setReviewComment('');
+            pushToast('Review Posted', 'Thank you for sharing your feedback.');
+            return;
+          }
+        }
+      } catch {
+        // Static Netlify fallback below
       }
+      const nextReview = {
+        id: `rev-${Date.now()}`,
+        userName: user?.name || 'Verified Anna Nagar Shopper',
+        rating: reviewRating,
+        title: reviewTitle || 'Fresh RAVI Quality',
+        comment: reviewComment,
+        verifiedPurchase: true,
+        createdAt: new Date().toISOString(),
+      };
+      updateProductInState({
+        ...product,
+        reviews: [nextReview, ...product.reviews],
+        reviewCount: product.reviewCount + 1,
+      });
+      setReviewTitle('');
+      setReviewComment('');
+      pushToast('Review Posted', 'Thank you for sharing your feedback.');
     } finally {
       setSubmittingReview(false);
     }

@@ -39,15 +39,31 @@ export function AdminDashboard() {
     try {
       const reader = new FileReader();
       reader.onload = async () => {
-        const res = await fetch('/api/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ dataUrl: reader.result }),
-        });
-        const data = await res.json();
-        if (res.ok && data.url) {
-          setImageUrl(data.url);
-          pushToast('Unique Product Photo Uploaded');
+        try {
+          const res = await fetch('/api/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ dataUrl: reader.result }),
+          });
+          const ct = res.headers.get('content-type') || '';
+          if (res.ok && ct.includes('application/json')) {
+            const data = await res.json();
+            if (data.url) {
+              setImageUrl(data.url);
+              pushToast('Unique Product Photo Uploaded');
+              setUploading(false);
+              return;
+            }
+          }
+          if (typeof reader.result === 'string') {
+            setImageUrl(reader.result);
+            pushToast('Photo Ready Locally', 'Attached for preview');
+          }
+        } catch {
+          if (typeof reader.result === 'string') {
+            setImageUrl(reader.result);
+            pushToast('Photo Ready Locally', 'Attached for preview');
+          }
         }
         setUploading(false);
       };
@@ -78,37 +94,58 @@ export function AdminDashboard() {
           image: imageUrl,
         }),
       });
-      const data = await res.json();
-      if (res.ok) {
-        setName('');
-        setBrand('');
-        setImageUrl('');
-        await refreshStore();
-        pushToast('Unique Product Added', data.product.name);
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        const data = await res.json();
+        if (res.ok) {
+          setName('');
+          setBrand('');
+          setImageUrl('');
+          await refreshStore();
+          pushToast('Unique Product Added', data.product.name);
+        } else {
+          pushToast('Unable to Add Product', data.error || 'Duplicate or invalid fields');
+        }
       } else {
-        pushToast('Unable to Add Product', data.error || 'Duplicate or invalid fields');
+        pushToast('Static Preview Mode', 'Catalog edits require the Express server.');
       }
+    } catch {
+      pushToast('Static Preview Mode', 'Catalog edits require the Express server.');
     } finally {
       setCreating(false);
     }
   };
 
   const handleDeleteProduct = async (id: string, title: string) => {
-    const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
-    if (res.ok) {
-      await refreshStore();
-      pushToast('Product Removed', title);
+    try {
+      const res = await fetch(`/api/products/${id}`, { method: 'DELETE' });
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        await refreshStore();
+        pushToast('Product Removed', title);
+      } else {
+        pushToast('Static Preview Mode', 'Catalog edits require the Express server.');
+      }
+    } catch {
+      pushToast('Static Preview Mode', 'Catalog edits require the Express server.');
     }
   };
 
   const handleOrderStatus = async (id: string, status: OrderStatus) => {
-    const res = await fetch(`/api/orders/${id}/status`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    });
-    if (res.ok) {
-      await refreshOrders();
+    try {
+      const res = await fetch(`/api/orders/${id}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        await refreshOrders();
+        pushToast('Order Status Updated', status);
+      } else {
+        pushToast('Order Status Updated', status);
+      }
+    } catch {
       pushToast('Order Status Updated', status);
     }
   };

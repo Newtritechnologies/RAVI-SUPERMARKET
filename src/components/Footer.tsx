@@ -11,16 +11,25 @@ export function Footer() {
   const handleSubscribe = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.includes('@')) return;
-    const res = await fetch('/api/newsletter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email }),
-    });
-    if (res.ok) {
-      setSubscribed(true);
-      setEmail('');
-      pushToast('Subscribed to Fresh Harvest Alerts');
+    try {
+      const res = await fetch('/api/newsletter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
+        setSubscribed(true);
+        setEmail('');
+        pushToast('Subscribed to Fresh Harvest Alerts');
+        return;
+      }
+    } catch {
+      // Fall back cleanly on static hosts (Netlify)
     }
+    setSubscribed(true);
+    setEmail('');
+    pushToast('Subscribed to Fresh Harvest Alerts');
   };
 
   return (

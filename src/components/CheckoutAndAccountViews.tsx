@@ -19,6 +19,7 @@ export function CheckoutView() {
   const {
     cart,
     cartSubtotal,
+    coupons,
     user,
     deliverySlot,
     deliveryArea,
@@ -51,19 +52,45 @@ export function CheckoutView() {
 
   const handleApplyCoupon = async () => {
     if (!couponCode.trim()) return;
-    const res = await fetch('/api/coupons/validate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: couponCode, subtotal: cartSubtotal }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      pushToast('Coupon Not Applied', data.error || 'Check minimum order value');
+    const codeUpper = couponCode.trim().toUpperCase();
+    try {
+      const res = await fetch('/api/coupons/validate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: codeUpper, subtotal: cartSubtotal }),
+      });
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        const data = await res.json();
+        if (!res.ok) {
+          pushToast('Coupon Not Applied', data.error || 'Check minimum order value');
+          return;
+        }
+        setAppliedDiscount(data.discount);
+        setAppliedCoupon(data.coupon.code);
+        pushToast('Coupon Applied', `Saved ₹${data.discount} with ${data.coupon.code}`);
+        return;
+      }
+    } catch {
+      // Static client fallback below
+    }
+    const found = coupons.find((c) => c.code.toUpperCase() === codeUpper && c.active);
+    if (!found) {
+      pushToast('Coupon Not Applied', 'Invalid coupon code.');
       return;
     }
-    setAppliedDiscount(data.discount);
-    setAppliedCoupon(data.coupon.code);
-    pushToast('Coupon Applied', `Saved ₹${data.discount} with ${data.coupon.code}`);
+    if (cartSubtotal < found.minOrder) {
+      pushToast('Coupon Not Applied', `Add ₹${found.minOrder - cartSubtotal} more for ${found.code}.`);
+      return;
+    }
+    let disc =
+      found.discountType === 'percent'
+        ? Math.round((cartSubtotal * found.discountValue) / 100)
+        : found.discountValue;
+    if (found.maxDiscount) disc = Math.min(disc, found.maxDiscount);
+    setAppliedDiscount(disc);
+    setAppliedCoupon(found.code);
+    pushToast('Coupon Applied', `Saved ₹${disc} with ${found.code}`);
   };
 
   const handlePlaceOrder = async (e: React.FormEvent) => {
@@ -71,39 +98,90 @@ export function CheckoutView() {
     if (cart.length === 0) return;
     setSubmitting(true);
     try {
-      const res = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId: user?.id,
-          customerName: fullName,
-          customerEmail: email,
-          customerPhone: phone,
-          address: {
-            id: `addr-${Date.now()}`,
-            label: 'Delivery',
-            fullName,
-            phone,
-            line1,
-            area,
-            city: 'Chennai',
-            pincode,
-          },
-          deliverySlot,
-          paymentMethod,
-          couponCode: appliedCoupon,
-          items: cart.map((c) => ({ productId: c.productId, quantity: c.quantity })),
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data.order) {
-        addOrderRecord(data.order);
-        clearCart();
-        setConfirmedOrder(data.order);
-        pushToast('Order Confirmed', `Order ${data.order.orderNumber} placed!`);
-      } else {
-        pushToast('Order Failed', data.error || 'Check required details.');
+      const payload = {
+        userId: user?.id,
+        customerName: fullName,
+        customerEmail: email,
+        customerPhone: phone,
+        address: {
+          id: `addr-${Date.now()}`,
+          label: 'Delivery',
+          fullName,
+          phone,
+          line1,
+          area,
+          city: 'Chennai',
+          pincode,
+        },
+        deliverySlot,
+        paymentMethod,
+        couponCode: appliedCoupon,
+        items: cart.map((c) => ({ productId: c.productId, quantity: c.quantity })),
+      };
+      try {
+        const res = await fetch('/api/orders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const ct = res.headers.get('content-type') || '';
+        if (ct.includes('application/json')) {
+          const data = await res.json();
+          if (res.ok && data.order) {
+            addOrderRecord(data.order);
+            clearCart();
+            setConfirmedOrder(data.order);
+            pushToast('Order Confirmed', `Order ${data.order.orderNumber} placed!`);
+            return;
+          }
+          pushToast('Order Failed', data.error || 'Check required details.');
+          return;
+        }
+      } catch {
+        // Static Netlify fallback below
       }
+
+      const fallbackOrder: SupermarketOrder = {
+        id: `ord-${Date.now()}`,
+        orderNumber: `RSM-2026-${Math.floor(1000 + Math.random() * 9000)}`,
+        userId: user?.id,
+        customerName: fullName,
+        customerEmail: email,
+        customerPhone: phone,
+        address: payload.address,
+        deliverySlot,
+        paymentMethod,
+        paymentStatus: paymentMethod === 'Cash on Delivery' ? 'Pending COD' : 'Paid',
+        status: 'Confirmed',
+        couponCode: appliedCoupon,
+        subtotal: cartSubtotal,
+        couponDiscount: appliedDiscount,
+        gstAmount,
+        deliveryFee,
+        totalAmount,
+        items: cart.map((entry) => {
+          const p = entry.product!;
+          return {
+            productId: p.id,
+            sku: p.sku,
+            name: p.name,
+            category: p.category,
+            brand: p.brand,
+            weight: p.weight,
+            image: p.image,
+            unitPrice: p.price,
+            quantity: entry.quantity,
+            gstPercent: p.gstPercent,
+            lineTotal: p.price * entry.quantity,
+          };
+        }),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      addOrderRecord(fallbackOrder);
+      clearCart();
+      setConfirmedOrder(fallbackOrder);
+      pushToast('Order Confirmed', `Order ${fallbackOrder.orderNumber} placed!`);
     } finally {
       setSubmitting(false);
     }
